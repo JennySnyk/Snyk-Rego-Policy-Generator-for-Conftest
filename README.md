@@ -28,33 +28,26 @@ This CLI tool generates custom Rego policies to validate Snyk scan outputs using
     ./rego-policy-generator
     ```
 
-2.  **Run a Snyk Scan**
+2.  **Run Snyk and `conftest`**
 
-    Run the appropriate Snyk scan and save the output. **Note the required output format for each product.**
+    Pipe the Snyk scan output directly into `conftest` for immediate validation. Use the `-` argument to tell `conftest` to read from stdin.
 
     *   **For Open Source, Code, and Container (JSON):**
         ```bash
         # Snyk Open Source
-        snyk test --json > snyk-os.json
+        snyk test --json | conftest test --policy your_policy.rego -
 
         # Snyk Code
-        snyk code test --sarif > snyk-code.json
+        snyk code test --sarif | conftest test --policy your_policy.rego -
 
         # Snyk Container
-        snyk container test your-image --json > snyk-container.json
+        snyk container test your-image --json | conftest test --policy your_policy.rego -
         ```
 
     *   **For Snyk IaC (Text):**
         ```bash
-        snyk iac test > snyk-iac.txt
+        snyk iac test | conftest test --policy your_policy.rego -
         ```
-
-3.  **Run `conftest`**
-
-    Use the generated policy to test the Snyk output file:
-    ```bash
-    conftest test --policy your_generated_policy.rego --input snyk-os.json
-    ```
 
 ## Prerequisites
 
