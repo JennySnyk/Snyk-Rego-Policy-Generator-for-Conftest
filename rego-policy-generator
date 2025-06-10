@@ -1,0 +1,196 @@
+import json
+import re
+
+# --- Predefined Policy Values ---
+SEVERITY_LEVELS = ["critical", "high", "medium", "low"]
+EXPLOIT_MATURITY_LEVELS = ["Mature", "Functional", "Proof of Concept", "Not Defined"]
+
+def get_snyk_product():
+    """Gets the Snyk product choice from the user."""
+    print("Which Snyk product's output do you want to analyze?")
+    print("1. Snyk Open Source")
+    print("2. Snyk Code")
+    print("3. Snyk Container")
+    print("4. Snyk IaC")
+    while True:
+        choice = input("Enter the number of your choice: ")
+        if choice in ["1", "2", "3", "4"]:
+            return choice
+        print("Invalid choice. Please enter a number between 1 and 4.")
+
+def _get_policy_value_from_options(prompt, options):
+    """Displays options and gets a valid choice from the user."""
+    print(prompt)
+    for i, option in enumerate(options, 1):
+        print(f"{i}. {option.title()}")
+    
+    while True:
+        choice_str = input("Enter the number of your choice: ")
+        try:
+            choice_idx = int(choice_str) - 1
+            if 0 <= choice_idx < len(options):
+                return options[choice_idx]
+            else:
+                print(f"Invalid choice. Please enter a number between 1 and {len(options)}.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+
+def get_policies(product_choice):
+    """Gets policy choices from the user based on the selected Snyk product."""
+    policies = []
+    # Product-specific policy options
+    policy_menus = {
+        '1': {"1": "severity", "2": "exploit_maturity"},
+        '2': {"1": "severity", "2": "cwe"},
+        '3': {"1": "severity", "2": "exploit_maturity"},
+        '4': {"1": "severity"},
+    }
+    policy_options_map = {
+        "severity": SEVERITY_LEVELS,
+        "exploit_maturity": EXPLOIT_MATURITY_LEVELS
+    }
+
+    while True:
+        print("\nWhich policy type do you want to apply?")
+        current_menu = policy_menus.get(product_choice, {})
+        for key, value in current_menu.items():
+            print(f"{key}. {value.replace('_', ' ').title()}")
+        
+        choice = input("Enter the number of your choice: ")
+
+        if choice in current_menu:
+            policy_type = current_menu[choice]
+            
+            if policy_type in policy_options_map:
+                options = policy_options_map[policy_type]
+                value = _get_policy_value_from_options(f"\nSelect a {policy_type.replace('_', ' ')} level:", options)
+            else: # For free-text policies like CWE
+                value = input(f"Enter the value for {policy_type.upper()} (e.g., CWE-79): ")
+
+            threshold_str = input(f"Enter the max allowed count for '{value}' (0 means deny all, or 'u' for unlimited): ").lower()
+            
+            if threshold_str == 'u':
+                threshold = 999999
+                print(f"Added policy: Report count of '{value}' {policy_type.replace('_', ' ')} (unlimited threshold).")
+            else:
+                try:
+                    threshold = int(threshold_str)
+                    print(f"Added policy: Fail if count of '{value}' {policy_type.replace('_', ' ')} is > {threshold}")
+                except ValueError:
+                    print("Invalid threshold. Please enter a whole number.")
+                    continue
+            
+            policies.append({"type": policy_type, "value": value, "threshold": threshold})
+        else:
+            print("Invalid choice.")
+        
+        if input("\nAdd another policy? (yes/no): ").lower() != 'yes':
+            break
+            
+    return policies
+
+def get_filename():
+    """Gets the desired filename from the user."""
+    return input("\nName your policy file (e.g., my_policy.rego): ")
+
+def generate_rego_rules(product_choice, policies):
+    """Generates the Rego 'deny' rules based on the Snyk product."""
+    rules = []
+    field_map = {
+        '1': {'severity': 'v.severity', 'exploit_maturity': 'v.exploit'},
+        '2': {'severity': 'r.level'},
+        '3': {'severity': 'v.severity', 'exploit_maturity': 'v.exploit'},
+        '4': {'severity': 'line'},
+    }
+
+    for policy in policies:
+        p_type, p_value = policy['type'], policy['value']
+
+        if p_type == 'cwe' and product_choice == '2':
+            rule = f'''
+deny contains msg if {{
+    current_cwe = "{p_value}"
+    rules_with_cwe = {{ rule.id |
+        rule := input.runs[0].tool.driver.rules[_]
+        rule.properties.cwe[_] == current_cwe
+    }}
+    vuln_count = count([res |
+        res := input.runs[0].results[_]
+        rules_with_cwe[res.ruleId]
+    ])
+    vuln_count > cwe_thresholds[current_cwe]
+    msg = sprintf("Policy Violation - CWE '%s': %v found, exceeds threshold of %v", [current_cwe, vuln_count, cwe_thresholds[current_cwe]])
+}}
+'''
+            rules.append(rule)
+            continue
+
+        field = field_map.get(product_choice, {}).get(p_type)
+        if not field: continue
+
+        p_type_formatted = p_type.replace('_', ' ').title()
+        rule_template = """
+deny contains msg if {{
+    current_value = \"{p_value}\"
+    {count_logic}
+    vuln_count > {p_type}_thresholds[current_value]
+    msg = sprintf("Policy Violation - {p_type_formatted} '%s': %v found, exceeds threshold of %v", [current_value, vuln_count, {p_type}_thresholds[current_value]])
+}}
+"""
+        count_logic = ""
+        if product_choice in ['1', '3']:  # OS, Container
+            count_logic = f"vuln_count = count([v | v = input.vulnerabilities[_]; {field} == current_value])"
+        elif product_choice == '2':  # Code
+            count_logic = f"vuln_count = count([r | r = input.runs[0].results[_]; {field} == current_value])"
+        elif product_choice == '4':  # IaC (Text-based)
+            count_logic = f"vuln_count = count([line | line := input[_]; contains(line, f'[{p_value.capitalize()}]')])"
+
+        rules.append(rule_template.format(
+            p_value=p_value,
+            p_type=p_type,
+            p_type_formatted=p_type_formatted,
+            count_logic=count_logic
+        ))
+    return "\n".join(rules)
+
+def generate_rego_file(product_choice, policies, filename):
+    """Generates the complete Rego file."""
+    threshold_maps = {}
+    for p in policies:
+        p_type = p['type']
+        if p_type not in threshold_maps: threshold_maps[p_type] = {}
+        threshold_maps[p_type][p['value']] = p['threshold']
+
+    rego_content = "package main\n\n"
+    for map_name, values in threshold_maps.items():
+        rego_content += f"# Thresholds for {map_name.replace('_', ' ')}\n"
+        rego_content += f"{map_name}_thresholds = {{\n"
+        for key, value in values.items():
+            rego_content += f'  \"{key}\": {value},\n'
+        rego_content += "}\n\n"
+
+    rego_content += generate_rego_rules(product_choice, policies)
+
+    try:
+        with open(filename, "w") as f:
+            f.write(rego_content)
+        print(f"\nSuccessfully generated Rego file: {filename}")
+    except IOError as e:
+        print(f"\nError writing to file: {e}")
+
+def main():
+    """Main function to run the application."""
+    print("Welcome to the Snyk Rego Policy Generator for Conftest!")
+    print("\nIMPORTANT: For Snyk Open Source and Container, please use the '--json' flag for accurate results.")
+    print("Example: snyk container test --json > snyk-container-results.json\n")
+    product_choice = get_snyk_product()
+    policies = get_policies(product_choice)
+    if not policies:
+        print("No policies defined. Exiting.")
+        return
+    filename = get_filename()
+    generate_rego_file(product_choice, policies, filename)
+    print("\nThank you for using the generator!")
+
+if __name__ == "__main__":
+    main()
