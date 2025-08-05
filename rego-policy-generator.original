@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import json
 import re
 
@@ -24,7 +23,7 @@ def _get_policy_value_from_options(prompt, options):
     print(prompt)
     for i, option in enumerate(options, 1):
         print(f"{i}. {option.title()}")
-
+    
     while True:
         choice_str = input("Enter the number of your choice: ")
         try:
@@ -56,12 +55,12 @@ def get_policies(product_choice):
         current_menu = policy_menus.get(product_choice, {})
         for key, value in current_menu.items():
             print(f"{key}. {value.replace('_', ' ').title()}")
-
+        
         choice = input("Enter the number of your choice: ")
 
         if choice in current_menu:
             policy_type = current_menu[choice]
-
+            
             if policy_type in policy_options_map:
                 options = policy_options_map[policy_type]
                 value = _get_policy_value_from_options(f"\nSelect a {policy_type.replace('_', ' ')} level:", options)
@@ -69,7 +68,7 @@ def get_policies(product_choice):
                 value = input(f"Enter the value for {policy_type.upper()} (e.g., CWE-79): ")
 
             threshold_str = input(f"Enter the max allowed count for '{value}' (0 means deny all, or 'u' for unlimited): ").lower()
-
+            
             if threshold_str == 'u':
                 threshold = 999999
                 print(f"Added policy: Report count of '{value}' {policy_type.replace('_', ' ')} (unlimited threshold).")
@@ -80,14 +79,14 @@ def get_policies(product_choice):
                 except ValueError:
                     print("Invalid threshold. Please enter a whole number.")
                     continue
-
+            
             policies.append({"type": policy_type, "value": value, "threshold": threshold})
         else:
             print("Invalid choice.")
-
+        
         if input("\nAdd another policy? (yes/no): ").lower() != 'yes':
             break
-
+            
     return policies
 
 def get_filename():
@@ -95,20 +94,8 @@ def get_filename():
     return input("\nName your policy file (e.g., my_policy.rego): ")
 
 def generate_rego_rules(product_choice, policies):
-    """Generates the Rego 'deny' rules based on the Snyk product with improved vulnerability detection."""
+    """Generates the Rego 'deny' rules based on the Snyk product."""
     rules = []
-    
-    # Add helper function for Open Source and Container products to handle nested structures
-    if product_choice in ['1', '3']:  # OS, Container
-        helper_function = """
-# Helper function to get all vulnerabilities from both top-level and nested structures
-all_vulnerabilities := array.concat(
-    input.vulnerabilities,
-    [v | app := input.applications[_]; v := app.vulnerabilities[_]]
-)
-"""
-        rules.append(helper_function)
-    
     field_map = {
         '1': {'severity': 'v.severity', 'exploit_maturity': 'v.exploit'},
         '2': {'severity': 'r.level'},
@@ -142,30 +129,32 @@ deny contains msg if {{
         if not field: continue
 
         p_type_formatted = p_type.replace('_', ' ').title()
-        
-        # Generate improved count logic
-        count_logic = ""
-        if product_choice in ['1', '3']:  # OS, Container - use improved helper
-            count_logic = f"vuln_count = count([v | v = all_vulnerabilities[_]; {field} == current_value])"
-        elif product_choice == '2':  # Code
-            count_logic = f"vuln_count = count([r | r = input.runs[0].results[_]; {field} == current_value])"
-        elif product_choice == '4':  # IaC (Text-based)
-            count_logic = f"vuln_count = count([line | line := input[_]; contains(line, f'[{p_value.capitalize()}]')])"
-
-        rule_template = f"""
+        rule_template = """
 deny contains msg if {{
-    current_value = "{p_value}"
+    current_value = \"{p_value}\"
     {count_logic}
     vuln_count > {p_type}_thresholds[current_value]
     msg = sprintf("Policy Violation - {p_type_formatted} '%s': %v found, exceeds threshold of %v", [current_value, vuln_count, {p_type}_thresholds[current_value]])
 }}
 """
-        rules.append(rule_template)
-    
+        count_logic = ""
+        if product_choice in ['1', '3']:  # OS, Container
+            count_logic = f"vuln_count = count([v | v = input.vulnerabilities[_]; {field} == current_value])"
+        elif product_choice == '2':  # Code
+            count_logic = f"vuln_count = count([r | r = input.runs[0].results[_]; {field} == current_value])"
+        elif product_choice == '4':  # IaC (Text-based)
+            count_logic = f"vuln_count = count([line | line := input[_]; contains(line, f'[{p_value.capitalize()}]')])"
+
+        rules.append(rule_template.format(
+            p_value=p_value,
+            p_type=p_type,
+            p_type_formatted=p_type_formatted,
+            count_logic=count_logic
+        ))
     return "\n".join(rules)
 
 def generate_rego_file(product_choice, policies, filename):
-    """Generates the complete Rego file with improved vulnerability detection."""
+    """Generates the complete Rego file."""
     threshold_maps = {}
     for p in policies:
         p_type = p['type']
@@ -173,41 +162,27 @@ def generate_rego_file(product_choice, policies, filename):
         threshold_maps[p_type][p['value']] = p['threshold']
 
     rego_content = "package main\n\n"
-    
-    # Add thresholds
     for map_name, values in threshold_maps.items():
         rego_content += f"# Thresholds for {map_name.replace('_', ' ')}\n"
         rego_content += f"{map_name}_thresholds = {{\n"
         for key, value in values.items():
-            rego_content += f'  "{key}": {value},\n'
+            rego_content += f'  \"{key}\": {value},\n'
         rego_content += "}\n\n"
 
-    # Add rules with improved vulnerability detection
     rego_content += generate_rego_rules(product_choice, policies)
 
     try:
         with open(filename, "w") as f:
             f.write(rego_content)
-        print(f"\nSuccessfully generated improved Rego file: {filename}")
-        print("\nIMPROVEMENTS:")
-        if product_choice in ['1', '3']:
-            print("✅ Enhanced vulnerability detection for nested JSON structures")
-            print("✅ Supports both input.vulnerabilities[] and input.applications[].vulnerabilities[]")
-            print("✅ Handles different Snyk output formats automatically")
-        print("✅ Generated policy will work with various JSON structures")
+        print(f"\nSuccessfully generated Rego file: {filename}")
     except IOError as e:
         print(f"\nError writing to file: {e}")
 
 def main():
-    """Main function to run the improved application."""
-    print("Welcome to the IMPROVED Snyk Rego Policy Generator for Conftest!")
-    print("\n🚀 NEW FEATURES:")
-    print("   • Enhanced vulnerability detection for nested JSON structures")
-    print("   • Supports multiple Snyk output formats automatically")
-    print("   • Improved compatibility with different scan results")
+    """Main function to run the application."""
+    print("Welcome to the Snyk Rego Policy Generator for Conftest!")
     print("\nIMPORTANT: For Snyk Open Source and Container, please use the '--json' flag for accurate results.")
     print("Example: snyk container test --json > snyk-container-results.json\n")
-    
     product_choice = get_snyk_product()
     policies = get_policies(product_choice)
     if not policies:
@@ -215,7 +190,7 @@ def main():
         return
     filename = get_filename()
     generate_rego_file(product_choice, policies, filename)
-    print("\nThank you for using the improved generator!")
+    print("\nThank you for using the generator!")
 
 if __name__ == "__main__":
     main()

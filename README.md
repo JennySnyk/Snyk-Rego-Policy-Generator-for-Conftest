@@ -4,6 +4,16 @@ This CLI tool generates custom Rego policies to validate Snyk scan outputs using
 
 `conftest` is a utility that helps you write tests against structured configuration data. By using this generator, you can create custom policies to enforce security and compliance standards on your Snyk scan results directly in your CI/CD pipeline.
 
+## 🚀 Recent Improvements
+
+**Enhanced Vulnerability Detection** - The generator now includes improved support for nested JSON structures:
+- ✅ **Nested Structure Support**: Handles vulnerabilities in both `input.vulnerabilities[]` and `input.applications[].vulnerabilities[]`
+- ✅ **Multiple Format Compatibility**: Works with different Snyk JSON output formats automatically
+- ✅ **Robust Policy Generation**: Uses `array.concat()` to merge vulnerabilities from all locations
+- ✅ **Backward Compatible**: Still works with original JSON formats
+
+This fixes critical issues where vulnerabilities in nested structures were previously missed by generated policies.
+
 ## Features
 
 - **Interactive CLI**: Guides you through creating complex Rego policies.
