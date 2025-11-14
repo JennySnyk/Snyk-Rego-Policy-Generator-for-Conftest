@@ -1,0 +1,123 @@
+{
+  "vulnerabilities": [
+    {
+      "id": "SNYK-JS-AXIOS-1234567",
+      "title": "Cross-site Scripting (XSS)",
+      "severity": "high",
+      "cvssScore": 7.5,
+      "exploit": "Proof of Concept",
+      "isUpgradable": true,
+      "isPatchable": false,
+      "identifiers": {
+        "CVE": ["CVE-2023-12345"]
+      },
+      "packageName": "axios",
+      "version": "0.21.0"
+    },
+    {
+      "id": "SNYK-JAVA-ORGAPACHELOG4J-2314720",
+      "title": "Remote Code Execution (RCE)",
+      "severity": "critical",
+      "cvssScore": 10.0,
+      "exploit": "Mature",
+      "isUpgradable": true,
+      "isPatchable": true,
+      "identifiers": {
+        "CVE": ["CVE-2021-44832"]
+      },
+      "packageName": "log4j-core",
+      "version": "2.14.1"
+    },
+    {
+      "id": "SNYK-JS-LODASH-567890",
+      "title": "Prototype Pollution",
+      "severity": "high",
+      "cvssScore": 6.5,
+      "exploit": "Functional",
+      "isUpgradable": true,
+      "isPatchable": false,
+      "identifiers": {
+        "CVE": ["CVE-2023-67890"]
+      },
+      "packageName": "lodash",
+      "version": "4.17.15"
+    },
+    {
+      "id": "SNYK-JS-MINIMIST-559764",
+      "title": "Prototype Pollution",
+      "severity": "medium",
+      "cvssScore": 5.6,
+      "exploit": "Not Defined",
+      "isUpgradable": false,
+      "isPatchable": false,
+      "identifiers": {
+        "CVE": ["CVE-2020-7598"]
+      },
+      "packageName": "minimist",
+      "version": "1.2.0"
+    },
+    {
+      "id": "SNYK-JS-ANSIREGEX-1583908",
+      "title": "Regular Expression Denial of Service (ReDoS)",
+      "severity": "high",
+      "cvssScore": 7.2,
+      "exploit": "Proof of Concept",
+      "isUpgradable": true,
+      "isPatchable": false,
+      "identifiers": {
+        "CVE": ["CVE-2021-3807"]
+      },
+      "packageName": "ansi-regex",
+      "version": "5.0.0"
+    },
+    {
+      "id": "SNYK-JS-NODE-FETCH-2342453",
+      "title": "Information Exposure",
+      "severity": "medium",
+      "cvssScore": 6.1,
+      "exploit": "Not Defined",
+      "isUpgradable": true,
+      "isPatchable": true,
+      "identifiers": {
+        "CVE": ["CVE-2022-0235"]
+      },
+      "packageName": "node-fetch",
+      "version": "2.6.0"
+    },
+    {
+      "id": "SNYK-JS-MOMENT-2441185",
+      "title": "Regular Expression Denial of Service (ReDoS)",
+      "severity": "high",
+      "cvssScore": 7.5,
+      "exploit": "Mature",
+      "isUpgradable": false,
+      "isPatchable": false,
+      "identifiers": {
+        "CVE": ["CVE-2022-31129"]
+      },
+      "packageName": "moment",
+      "version": "2.29.1"
+    },
+    {
+      "id": "SNYK-JAVA-ORGAPACHELOG4J-2314722",
+      "title": "Denial of Service (DoS)",
+      "severity": "medium",
+      "cvssScore": 5.5,
+      "exploit": "Not Defined",
+      "isUpgradable": true,
+      "isPatchable": false,
+      "identifiers": {
+        "CVE": ["CVE-2021-45046"]
+      },
+      "packageName": "log4j-core",
+      "version": "2.14.1"
+    }
+  ],
+  "summary": {
+    "critical": 1,
+    "high": 4,
+    "medium": 3,
+    "low": 0
+  }
+}
+
