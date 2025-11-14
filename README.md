@@ -77,14 +77,11 @@ This creates a policy that fails if more than 5 vulnerabilities with available f
 
 - **[QUICK_START.md](QUICK_START.md)** - Quick reference and common scenarios
 - **[FEATURES.md](FEATURES.md)** - Detailed feature documentation
-- **[CHANGELOG.md](CHANGELOG.md)** - Version history and release notes
 - **[examples/](examples/)** - Working policy examples
 
 ## Version History
 
-See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
-
-**Current Version: 2.0**
+**Current Version: 2.0** - See git tags for version tracking
 - Added Fix Availability filtering
 - Added CVSS Score thresholds
 - Added CVE-Specific policies
