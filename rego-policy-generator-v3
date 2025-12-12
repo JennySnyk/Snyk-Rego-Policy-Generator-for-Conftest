@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+"""
+Snyk Rego Policy Generator v3
+=============================
+Features:
+  - v1: Basic severity and exploit maturity policies
+  - v2: Enhanced nested JSON structure support
+  - v3: NEW! Blocked packages policy for deny-listing specific dependencies
+"""
+
+import json
+import re
+
+# --- Predefined Policy Values ---
+SEVERITY_LEVELS = ["critical", "high", "medium", "low"]
+EXPLOIT_MATURITY_LEVELS = ["Mature", "Functional", "Proof of Concept", "Not Defined"]
+
+def get_snyk_product():
+    """Gets the Snyk product choice from the user."""
+    print("Which Snyk product's output do you want to analyze?")
+    print("1. Snyk Open Source")
+    print("2. Snyk Code")
+    print("3. Snyk Container")
+    print("4. Snyk IaC")
+    while True:
+        choice = input("Enter the number of your choice: ")
+        if choice in ["1", "2", "3", "4"]:
+            return choice
+        print("Invalid choice. Please enter a number between 1 and 4.")
+
+def _get_policy_value_from_options(prompt, options):
+    """Displays options and gets a valid choice from the user."""
+    print(prompt)
+    for i, option in enumerate(options, 1):
+        print(f"{i}. {option.title()}")
+
+    while True:
+        choice_str = input("Enter the number of your choice: ")
+        try:
+            choice_idx = int(choice_str) - 1
+            if 0 <= choice_idx < len(options):
+                return options[choice_idx]
+            else:
+                print(f"Invalid choice. Please enter a number between 1 and {len(options)}.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+
+def get_blocked_packages():
+    """Gets a list of blocked packages from the user."""
+    blocked_packages = []
+    print("\n📦 BLOCKED PACKAGES CONFIGURATION")
+    print("=" * 50)
+    print("Enter packages that should ALWAYS fail the policy check.")
+    print("Use cases: malicious packages, license violations, deprecated libs")
+    print("")
+    print("Format examples:")
+    print("  • lodash (blocks all versions)")
+    print("  • log4j-core (blocks specific library)")
+    print("  • event-stream (blocks compromised package)")
+    print("")
+    
+    while True:
+        package_name = input("Enter package name to block (or 'done' to finish): ").strip()
+        
+        if package_name.lower() == 'done':
+            break
+        
+        if not package_name:
+            print("Please enter a valid package name.")
+            continue
+        
+        # Optional: Get reason for blocking
+        reason = input(f"  Reason for blocking '{package_name}' (optional, press Enter to skip): ").strip()
+        
+        if reason:
+            blocked_packages.append({"name": package_name, "reason": reason})
+            print(f"  ✅ Added '{package_name}' to blocklist (Reason: {reason})")
+        else:
+            blocked_packages.append({"name": package_name, "reason": "Policy violation"})
+            print(f"  ✅ Added '{package_name}' to blocklist")
+        
+        print("")
+    
+    return blocked_packages
+
+def get_policies(product_choice):
+    """Gets policy choices from the user based on the selected Snyk product."""
+    policies = []
+    blocked_packages = []
+    
+    # Product-specific policy options
+    policy_menus = {
+        '1': {"1": "severity", "2": "exploit_maturity", "3": "blocked_packages"},  # v3: Added blocked packages
+        '2': {"1": "severity", "2": "cwe"},
+        '3': {"1": "severity", "2": "exploit_maturity", "3": "blocked_packages"},  # v3: Added blocked packages
+        '4': {"1": "severity"},
+    }
+    policy_options_map = {
+        "severity": SEVERITY_LEVELS,
+        "exploit_maturity": EXPLOIT_MATURITY_LEVELS
+    }
+
+    while True:
+        print("\nWhich policy type do you want to apply?")
+        current_menu = policy_menus.get(product_choice, {})
+        for key, value in current_menu.items():
+            display_name = value.replace('_', ' ').title()
+            if value == "blocked_packages":
+                display_name += " 🆕"  # Highlight new feature
+            print(f"{key}. {display_name}")
+
+        choice = input("Enter the number of your choice: ")
+
+        if choice in current_menu:
+            policy_type = current_menu[choice]
+
+            # v3: Handle blocked packages separately
+            if policy_type == "blocked_packages":
+                new_blocked = get_blocked_packages()
+                blocked_packages.extend(new_blocked)
+                if new_blocked:
+                    print(f"\n📋 Total blocked packages: {len(blocked_packages)}")
+            elif policy_type in policy_options_map:
+                options = policy_options_map[policy_type]
+                value = _get_policy_value_from_options(f"\nSelect a {policy_type.replace('_', ' ')} level:", options)
+                
+                threshold_str = input(f"Enter the max allowed count for '{value}' (0 means deny all, or 'u' for unlimited): ").lower()
+
+                if threshold_str == 'u':
+                    threshold = 999999
+                    print(f"Added policy: Report count of '{value}' {policy_type.replace('_', ' ')} (unlimited threshold).")
+                else:
+                    try:
+                        threshold = int(threshold_str)
+                        print(f"Added policy: Fail if count of '{value}' {policy_type.replace('_', ' ')} is > {threshold}")
+                    except ValueError:
+                        print("Invalid threshold. Please enter a whole number.")
+                        continue
+
+                policies.append({"type": policy_type, "value": value, "threshold": threshold})
+            else:  # For free-text policies like CWE
+                value = input(f"Enter the value for {policy_type.upper()} (e.g., CWE-79): ")
+                
+                threshold_str = input(f"Enter the max allowed count for '{value}' (0 means deny all, or 'u' for unlimited): ").lower()
+
+                if threshold_str == 'u':
+                    threshold = 999999
+                    print(f"Added policy: Report count of '{value}' {policy_type.replace('_', ' ')} (unlimited threshold).")
+                else:
+                    try:
+                        threshold = int(threshold_str)
+                        print(f"Added policy: Fail if count of '{value}' {policy_type.replace('_', ' ')} is > {threshold}")
+                    except ValueError:
+                        print("Invalid threshold. Please enter a whole number.")
+                        continue
+
+                policies.append({"type": policy_type, "value": value, "threshold": threshold})
+        else:
+            print("Invalid choice.")
+
+        if input("\nAdd another policy? (yes/no): ").lower() != 'yes':
+            break
+
+    return policies, blocked_packages
+
+def get_filename():
+    """Gets the desired filename from the user."""
+    return input("\nName your policy file (e.g., my_policy.rego): ")
+
+def generate_blocked_packages_rules(product_choice, blocked_packages):
+    """Generates Rego rules for blocked packages."""
+    if not blocked_packages:
+        return ""
+    
+    rules = []
+    
+    # Create the blocked packages set with reasons
+    rules.append("\n# ========================================")
+    rules.append("# BLOCKED PACKAGES POLICY (v3)")
+    rules.append("# ========================================")
+    rules.append("# Packages in this list will ALWAYS cause a policy failure")
+    rules.append("")
+    rules.append("blocked_packages = {")
+    for pkg in blocked_packages:
+        rules.append(f'  "{pkg["name"]}": "{pkg["reason"]}",')
+    rules.append("}")
+    rules.append("")
+    
+    # Generate the deny rule based on product type
+    if product_choice in ['1', '3']:  # Open Source, Container
+        # Use the all_vulnerabilities helper that handles nested structures
+        rule = '''
+# Deny if any blocked package is found in vulnerabilities
+deny contains msg if {
+    pkg_name := blocked_packages[_]
+    v := all_vulnerabilities[_]
+    v.packageName == pkg_name
+    msg := sprintf("🚫 BLOCKED PACKAGE DETECTED: '%s' - Reason: %s", [pkg_name, blocked_packages[pkg_name]])
+}
+
+# Alternative check using 'name' field (some Snyk outputs use this)
+deny contains msg if {
+    pkg_name := blocked_packages[_]
+    v := all_vulnerabilities[_]
+    v.name == pkg_name
+    msg := sprintf("🚫 BLOCKED PACKAGE DETECTED: '%s' - Reason: %s", [pkg_name, blocked_packages[pkg_name]])
+}
+
+# Check for blocked packages in direct dependencies (displayTargetFile context)
+deny contains msg if {
+    pkg_name := blocked_packages[_]
+    v := all_vulnerabilities[_]
+    contains(v.from[_], pkg_name)
+    msg := sprintf("🚫 BLOCKED PACKAGE IN DEPENDENCY CHAIN: '%s' found in dependency path - Reason: %s", [pkg_name, blocked_packages[pkg_name]])
+}
+'''
+        rules.append(rule)
+    
+    return "\n".join(rules)
+
+def generate_rego_rules(product_choice, policies):
+    """Generates the Rego 'deny' rules based on the Snyk product with improved vulnerability detection."""
+    rules = []
+    
+    # Add helper function for Open Source and Container products to handle nested structures
+    if product_choice in ['1', '3']:  # OS, Container
+        helper_function = """
+# Helper function to get all vulnerabilities from both top-level and nested structures
+all_vulnerabilities := array.concat(
+    input.vulnerabilities,
+    [v | app := input.applications[_]; v := app.vulnerabilities[_]]
+)
+"""
+        rules.append(helper_function)
+    
+    field_map = {
+        '1': {'severity': 'v.severity', 'exploit_maturity': 'v.exploit'},
+        '2': {'severity': 'r.level'},
+        '3': {'severity': 'v.severity', 'exploit_maturity': 'v.exploit'},
+        '4': {'severity': 'line'},
+    }
+
+    for policy in policies:
+        p_type, p_value = policy['type'], policy['value']
+
+        if p_type == 'cwe' and product_choice == '2':
+            rule = f'''
+deny contains msg if {{
+    current_cwe = "{p_value}"
+    rules_with_cwe = {{ rule.id |
+        rule := input.runs[0].tool.driver.rules[_]
+        rule.properties.cwe[_] == current_cwe
+    }}
+    vuln_count = count([res |
+        res := input.runs[0].results[_]
+        rules_with_cwe[res.ruleId]
+    ])
+    vuln_count > cwe_thresholds[current_cwe]
+    msg = sprintf("Policy Violation - CWE '%s': %v found, exceeds threshold of %v", [current_cwe, vuln_count, cwe_thresholds[current_cwe]])
+}}
+'''
+            rules.append(rule)
+            continue
+
+        field = field_map.get(product_choice, {}).get(p_type)
+        if not field: continue
+
+        p_type_formatted = p_type.replace('_', ' ').title()
+        
+        # Generate improved count logic
+        count_logic = ""
+        if product_choice in ['1', '3']:  # OS, Container - use improved helper
+            count_logic = f"vuln_count = count([v | v = all_vulnerabilities[_]; {field} == current_value])"
+        elif product_choice == '2':  # Code
+            count_logic = f"vuln_count = count([r | r = input.runs[0].results[_]; {field} == current_value])"
+        elif product_choice == '4':  # IaC (Text-based)
+            count_logic = f"vuln_count = count([line | line := input[_]; contains(line, f'[{p_value.capitalize()}]')])"
+
+        rule_template = f"""
+deny contains msg if {{
+    current_value = "{p_value}"
+    {count_logic}
+    vuln_count > {p_type}_thresholds[current_value]
+    msg = sprintf("Policy Violation - {p_type_formatted} '%s': %v found, exceeds threshold of %v", [current_value, vuln_count, {p_type}_thresholds[current_value]])
+}}
+"""
+        rules.append(rule_template)
+    
+    return "\n".join(rules)
+
+def generate_rego_file(product_choice, policies, blocked_packages, filename):
+    """Generates the complete Rego file with improved vulnerability detection and blocked packages."""
+    threshold_maps = {}
+    for p in policies:
+        p_type = p['type']
+        if p_type not in threshold_maps: threshold_maps[p_type] = {}
+        threshold_maps[p_type][p['value']] = p['threshold']
+
+    rego_content = "package main\n\n"
+    
+    # Add thresholds
+    for map_name, values in threshold_maps.items():
+        rego_content += f"# Thresholds for {map_name.replace('_', ' ')}\n"
+        rego_content += f"{map_name}_thresholds = {{\n"
+        for key, value in values.items():
+            rego_content += f'  "{key}": {value},\n'
+        rego_content += "}\n\n"
+
+    # Add rules with improved vulnerability detection
+    rego_content += generate_rego_rules(product_choice, policies)
+    
+    # v3: Add blocked packages rules
+    rego_content += generate_blocked_packages_rules(product_choice, blocked_packages)
+
+    try:
+        with open(filename, "w") as f:
+            f.write(rego_content)
+        print(f"\n{'=' * 60}")
+        print(f"✅ Successfully generated Rego policy v3: {filename}")
+        print(f"{'=' * 60}")
+        print("\n📊 POLICY SUMMARY:")
+        print(f"   • Threshold-based policies: {len(policies)}")
+        print(f"   • Blocked packages: {len(blocked_packages)}")
+        
+        print("\n🚀 FEATURES INCLUDED:")
+        if product_choice in ['1', '3']:
+            print("   ✅ Enhanced vulnerability detection for nested JSON structures")
+            print("   ✅ Supports both input.vulnerabilities[] and input.applications[].vulnerabilities[]")
+        if blocked_packages:
+            print("   ✅ Blocked packages deny-list policy")
+            print("   ✅ Checks packageName, name, and dependency chain")
+        print("   ✅ Compatible with various Snyk JSON output formats")
+        
+        if blocked_packages:
+            print("\n🚫 BLOCKED PACKAGES:")
+            for pkg in blocked_packages:
+                print(f"   • {pkg['name']} - {pkg['reason']}")
+                
+    except IOError as e:
+        print(f"\nError writing to file: {e}")
+
+def main():
+    """Main function to run the v3 application."""
+    print("╔══════════════════════════════════════════════════════════════╗")
+    print("║     Snyk Rego Policy Generator for Conftest - VERSION 3      ║")
+    print("╚══════════════════════════════════════════════════════════════╝")
+    print("\n🆕 NEW IN v3:")
+    print("   • BLOCKED PACKAGES POLICY - Create a deny-list of packages")
+    print("   • Perfect for: malicious pkgs, license issues, deprecated libs")
+    print("")
+    print("📦 EXISTING FEATURES:")
+    print("   • Enhanced vulnerability detection for nested JSON structures")
+    print("   • Severity and exploit maturity thresholds")
+    print("   • CWE-based policies for Snyk Code")
+    print("\nIMPORTANT: For Snyk Open Source and Container, use '--json' flag")
+    print("Example: snyk test --json | conftest test --policy your_policy.rego -")
+    print("")
+    
+    product_choice = get_snyk_product()
+    policies, blocked_packages = get_policies(product_choice)
+    
+    if not policies and not blocked_packages:
+        print("No policies defined. Exiting.")
+        return
+    
+    filename = get_filename()
+    generate_rego_file(product_choice, policies, blocked_packages, filename)
+    
+    print("\n" + "=" * 60)
+    print("Thank you for using Snyk Rego Policy Generator v3!")
+    print("=" * 60)
+
+if __name__ == "__main__":
+    main()
+
